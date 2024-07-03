@@ -1,1 +1,1 @@
-[Tensor4All website](https://tensor4all.github.io/)
+[tensor4all website](https://tensor4all.github.io/)
