@@ -1,0 +1,35 @@
+name: PR verification section
+
+# Reusable. A repository opts in with four lines (see ../README.md):
+#
+#   name: PR verification section
+#   on: [pull_request]
+#   jobs:
+#     body:
+#       uses: tensor4all/.github/.github/workflows/pr-verification.yml@main
+#
+# GitHub has no organization-wide *required workflow* anymore (rulesets can only
+# require a check that runs in the repository itself), so the four lines are the
+# price of org-wide enforcement. The template, by contrast, IS org-wide with no
+# per-repository file: `.github` here is the default community health file repo.
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  body:
+    name: body
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          repository: tensor4all/.github
+          path: org
+          persist-credentials: false
+      - name: Check the description against the template's contract
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: python3 org/scripts/check_pr_body.py
