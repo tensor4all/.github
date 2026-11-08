@@ -180,8 +180,14 @@ def main() -> int:
     args = ap.parse_args()
 
     if args.body_file:
-        with open(args.body_file, encoding="utf-8") as fh:
-            body = fh.read()
+        try:
+            with open(args.body_file, encoding="utf-8") as fh:
+                body = fh.read()
+        except OSError as exc:
+            # Exit 2, never 1: the rejection code must mean "the description is
+            # wrong", so a crash or a bad invocation cannot be mistaken for a verdict.
+            print(f"::error::cannot read the description: {exc}")
+            return 2
     else:
         body = os.environ.get("PR_BODY", "")
 
