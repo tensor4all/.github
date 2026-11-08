@@ -1,0 +1,58 @@
+name: self-test
+
+# Runs on this repository only. Two things it must prove:
+#   1. the checker's cases pass (they are committed: a validator whose tests are
+#      not in the tree is a claim, not a check),
+#   2. the CLI rejects the template for the documented reason — asserting the
+#      exit code and the message, not merely "nonzero". `cmd && exit 1 || exit 0`
+#      treats a crash or a bad invocation as a successful rejection; that is how
+#      a broken checker stays green.
+
+on:
+  push:
+    branches: [main]
+    paths: ["scripts/**", "pull_request_template.md", ".github/workflows/**"]
+  pull_request:
+    paths: ["scripts/**", "pull_request_template.md", ".github/workflows/**"]
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Checker cases
+        run: python3 scripts/test_check_pr_body.py
+
+      - name: The CLI rejects the template, for the documented reason
+        run: |
+          set +e
+          out=$(python3 scripts/check_pr_body.py --body-file pull_request_template.md 2>&1)
+          rc=$?
+          set -e
+          echo "$out"
+          test "$rc" -eq 1 || { echo "::error::expected exit 1, got $rc"; exit 1; }
+          case "$out" in
+            *"::error::The \`## Verification\` section still contains the template's placeholder text"*) ;;
+            *) echo "::error::the rejection was not the placeholder rule"; exit 1 ;;
+          esac
+
+      - name: The CLI accepts a body with evidence
+        run: |
+          printf '## Verification\n\n```\ncargo test -> 216 passed\n```\n' > "$RUNNER_TEMP/ok.md"
+          python3 scripts/check_pr_body.py --body-file "$RUNNER_TEMP/ok.md"
+
+      - name: A crashing checker must not look like a rejecting one
+        run: |
+          set +e
+          python3 scripts/check_pr_body.py --body-file /nonexistent-body.md >/dev/null 2>&1
+          rc=$?
+          set -e
+          if [ "$rc" -eq 1 ]; then
+            echo "::error::a missing input exited 1, which is the rejection code: a reviewer could not tell a crash from a verdict"
+            exit 1
+          fi
+          echo "missing input exits $rc (not the rejection code 1) — the two are distinguishable"

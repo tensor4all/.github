@@ -1,0 +1,53 @@
+name: PR verification section
+
+# Reusable. A repository opts in with the caller in ../README.md.
+#
+# Why a caller per repository instead of "Require workflows to pass" in an
+# organization ruleset: ruleset-required workflows are run by the ruleset runner
+# on `opened`, `synchronize` and `reopened` only, so an `edited` description
+# never re-runs them. That cuts both ways — a fixed description stays red, and a
+# description whose evidence was deleted stays green. A repository's own
+# workflow does fire on `edited`, which is the property this check exists for.
+#
+# The body is read from the event when it is there, and fetched by number for
+# `merge_group`, which has no `pull_request` payload.
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  body:
+    name: body
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          repository: tensor4all/.github
+          path: org
+          persist-credentials: false
+      - name: Resolve the description
+        id: body
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          MG_NUMBER: ${{ github.event.merge_group.pull_requests[0].number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if [ -n "${PR_NUMBER:-}" ]; then
+            printf '%s' "${PR_BODY:-}" > "$RUNNER_TEMP/body.md"
+            echo "source=pull_request" >> "$GITHUB_OUTPUT"
+          elif [ -n "${MG_NUMBER:-}" ]; then
+            gh api "repos/${REPO}/pulls/${MG_NUMBER}" --jq .body > "$RUNNER_TEMP/body.md"
+            echo "source=merge_group" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::Neither a pull request nor a merge group in this event; nothing to check."
+            exit 1
+          fi
+      - name: Check the description against the template's contract
+        run: python3 org/scripts/check_pr_body.py --body-file "$RUNNER_TEMP/body.md"
