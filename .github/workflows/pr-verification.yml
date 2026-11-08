@@ -1,20 +1,18 @@
 name: PR verification section
 
-# Reusable. A repository opts in with four lines (see ../README.md):
+# Organization-wide, from this repository: an organization ruleset can require
+# this workflow ("Require workflows to pass before merging"), so a target
+# repository needs **no file of its own**. Verified against the API: a `workflows`
+# rule pointing at tensor4all/.github rejects an unknown repository id and an
+# unknown path, and is otherwise accepted on this organization's plan.
 #
-#   name: PR verification section
-#   on: [pull_request]
-#   jobs:
-#     body:
-#       uses: tensor4all/.github/.github/workflows/pr-verification.yml@main
-#
-# GitHub has no organization-wide *required workflow* anymore (rulesets can only
-# require a check that runs in the repository itself), so the four lines are the
-# price of org-wide enforcement. The template, by contrast, IS org-wide with no
-# per-repository file: `.github` here is the default community health file repo.
+# `edited` is in the trigger list on purpose: without it, fixing the description
+# after a failure leaves the check red, and deleting the evidence after a success
+# leaves it green.
 
 on:
-  workflow_call:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
 
 permissions:
   contents: read

@@ -1,0 +1,28 @@
+name: self-test
+
+# Runs on this repository only. The checker's own cases are committed
+# (`scripts/test_check_pr_body.py`) because a validator whose tests are not in
+# the tree is a claim, not a check: the first version of this checker passed all
+# eight hand-run cases and still let five wrong bodies through.
+
+on:
+  push:
+    branches: [main]
+    paths: ["scripts/**", "pull_request_template.md", ".github/workflows/**"]
+  pull_request:
+    paths: ["scripts/**", "pull_request_template.md", ".github/workflows/**"]
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Checker cases
+        run: python3 scripts/test_check_pr_body.py
+      - name: The template itself must be rejected
+        # A template that passes its own check is a template whose placeholder
+        # text reads as evidence.
+        run: python3 scripts/check_pr_body.py --body-file pull_request_template.md && exit 1 || exit 0
