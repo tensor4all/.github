@@ -42,6 +42,9 @@ import sys
 
 OPT_OUT = re.compile(r"<!--\s*skip-verification-check:\s*(.*?)\s*-->", re.IGNORECASE | re.DOTALL)
 HTML_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
+# GitHub renders an unclosed `<!--` as a comment to end of input; a regex that
+# needs `-->` therefore sees text the reviewer never sees.
+HTML_COMMENT_UNCLOSED = re.compile(r"<!--(?:(?!-->).)*$", re.DOTALL)
 NOT_MEASURED = re.compile(r"not\s+measured\b(.*)", re.IGNORECASE)
 HEADING_VERIFICATION = re.compile(r"^##\s*verification\s*$", re.IGNORECASE)
 FENCE_OPEN = re.compile(r"^(```+|~~~+)\s*(\S*)\s*$")
@@ -58,7 +61,8 @@ OK, BAD = 0, 1
 
 def strip_comments(text: str) -> str:
     """Remove HTML comments, preserving the line structure around them."""
-    return HTML_COMMENT.sub(lambda m: "\n" * m.group(0).count("\n"), text)
+    out = HTML_COMMENT.sub(lambda m: "\n" * m.group(0).count("\n"), text)
+    return HTML_COMMENT_UNCLOSED.sub(lambda m: "\n" * m.group(0).count("\n"), out)
 
 
 def scan(text: str) -> tuple[list[tuple[int, int, str]], list[tuple[int, int]]]:
@@ -85,7 +89,10 @@ def scan(text: str) -> tuple[list[tuple[int, int, str]], list[tuple[int, int]]]:
             if m:
                 opening = (m.group(1), idx, m.group(2))
                 continue
-            if stripped.startswith("##"):
+            # Only a level-2 heading ends a level-2 section. `### Commands` is a
+            # subsection of `## Verification` in GitHub's rendering, so it must
+            # not terminate the scan.
+            if re.match(r"^##\s+\S", stripped) and not stripped.startswith("###"):
                 headings.append((offsets[idx], offsets[idx] + len(ln)))
         else:
             char, start_idx, info = opening
@@ -139,7 +146,9 @@ def check(body: str) -> tuple[int, str]:
                      "output, or write `Not measured` and why. A heading inside an HTML comment does "
                      "not count: a reviewer cannot see it.")
 
-    following = [h for h in headings if h[0] > ver[1]]
+    # `>=`, not `>`: `## Verification\n## Scope` puts the next heading exactly at the
+    # end of the first, and `>` would let Scope's content count as verification.
+    following = [h for h in headings if h[0] >= ver[1]]
     sec_start = ver[1]
     sec_end = following[0][0] if following else len(visible)
     section = visible[sec_start:sec_end]

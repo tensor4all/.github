@@ -11,32 +11,46 @@ by adding its own `.github/pull_request_template.md`.
 
 Nothing needs copying. `tenferro-rs` keeps its own template and keeps it.
 
-## 2. The check is org-wide too, through an organization ruleset
+## 2. The check needs one small file per repository. Second correction, and why.
 
-**Correction to an earlier version of this file:** I wrote that organization-wide enforcement was
-impossible because the ruleset rule list only offers "Require status checks to pass". That was wrong.
-The `workflows` rule exists ("Require workflows to pass before merging") and the API accepts it for this
-organization:
+I have been wrong about this twice, so here is the record.
 
+**First** I said organization-wide enforcement was impossible, because the ruleset rule list only shows
+"Require status checks to pass". That was wrong: the `workflows` rule exists, and the API parses and
+resolves it for this organization (`repository_id: 0` → `422 Workflow source repository not found`;
+a path not on `main` → `422 … does not contain a workflow at: …`).
+
+**Then** I said the four-line caller was unnecessary. Also wrong, for a reason that matters more than
+the file count: **a workflow required by an organization ruleset is run by the ruleset runner on
+`opened`, `synchronize` and `reopened` only.** No `edited`. This check exists to catch a description
+with no evidence, and the two ways a description changes are exactly the two the runner ignores: fix
+the description after a failure (stays red), or delete the evidence after a success (stays green). A
+repository's own `pull_request` workflow does fire on `edited`, so the caller is what buys the
+property, not red tape.
+
+The caller, in `.github/workflows/pr-verification.yml` of each repository that opts in:
+
+```yaml
+name: PR verification section
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+  merge_group:
+permissions:
+  contents: read
+  pull-requests: read
+jobs:
+  body:
+    uses: tensor4all/.github/.github/workflows/pr-verification.yml@main
 ```
-POST orgs/tensor4all/rulesets
-  { "rules": [{ "type": "workflows", "parameters": { "workflows": [
-      { "repository_id": 802971965,
-        "path": ".github/workflows/pr-verification.yml",
-        "ref": "refs/heads/main" } ] } } ] }
 
-repository_id: 0          -> 422 "Workflow source repository not found"
-path that does not exist  -> 422 "tensor4all/.github does not contain a workflow at: …"
-```
+`merge_group` is there because a repository with a merge queue cannot satisfy a required check that
+never runs for its merge group; the reusable workflow fetches the description by PR number in that case,
+since the merge group event carries no `pull_request` payload.
 
-Both rejections show the rule being parsed and resolved; it fails only because the file is not on
-`main` yet. So the deployment is: merge this, then create one organization ruleset naming that
-workflow. **No file in any target repository.** An earlier version of this README told people to copy a
-four-line caller into each repository — unnecessary work caused by a wrong reading of the docs.
-
-The workflow runs on `opened`, `edited`, `reopened` and `synchronize`. `edited` matters: without it,
-fixing the description after a failure leaves the check red, and deleting the evidence after a success
-leaves it green.
+Then one organization ruleset requiring the check `PR verification section / body` on
+`~DEFAULT_BRANCH` for the repositories that have the caller. Start it in **evaluate** mode: `active`
+would turn every open pull request in those repositories red at once.
 
 ## Why a check and not a convention
 

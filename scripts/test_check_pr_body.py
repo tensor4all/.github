@@ -50,6 +50,12 @@ class Accepts(unittest.TestCase):
         code, msg = check(body)
         self.assertEqual(code, OK, msg)
 
+    def test_subsection_keeps_its_evidence(self):
+        """regression: `### Commands` was treated as the end of the section."""
+        body = "## Verification\n\n### Commands\n```sh\npytest\n1 passed\n```\n"
+        code, msg = check(body)
+        self.assertEqual(code, OK, msg)
+
     def test_opt_out_with_reason(self):
         code, msg = check("## Verification\n\n<!-- skip-verification-check: reviewer approved verbally -->\n")
         self.assertEqual(code, OK, msg)
@@ -88,6 +94,16 @@ class Rejects(unittest.TestCase):
     def test_blank_opt_out_reason(self):
         """regression: `skip-verification-check:   ` passed with no reason."""
         self.assertEqual(check("## Verification\n\n<!-- skip-verification-check:   -->\n")[0], BAD)
+
+    def test_adjacent_section_does_not_donate_evidence(self):
+        """regression: `## Verification\n## Scope` let Scope's block count."""
+        body = "## Verification\n## Scope\n\n```sh\nnot evidence for verification\n```\n"
+        self.assertEqual(check(body)[0], BAD)
+
+    def test_unclosed_comment_hides_everything(self):
+        """regression: an unclosed `<!--` hides text from a reviewer but not from us."""
+        body = "<!--\n## Verification\n\n```sh\npytest\n1 passed\n```\n"
+        self.assertEqual(check(body)[0], BAD)
 
     def test_not_measured_without_reason(self):
         self.assertEqual(check("## Verification\n\nNot measured\n")[0], BAD)
