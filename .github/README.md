@@ -34,7 +34,7 @@ The caller, in `.github/workflows/pr-verification.yml` of each repository that o
 name: PR verification section
 on:
   pull_request:
-    types: [opened, edited, reopened, synchronize]
+    types: [opened, edited, reopened, synchronize, ready_for_review]
   merge_group:
 permissions:
   contents: read
@@ -43,6 +43,10 @@ jobs:
   body:
     uses: tensor4all/.github/.github/workflows/pr-verification.yml@main
 ```
+
+Draft pull requests are skipped by the reusable workflow (the job concludes *skipped*, which a required check treats as passing). `ready_for_review` must be in the caller's `types` so that marking a draft ready runs the check; a caller without it only checks the ready PR on its next edit or push.
+
+Evidence may be a fenced block, an indented block, or prose that names a command in an inline code span and quotes its output (a second span on the line, or a `>` quotation). A ready PR with none of these, or with a missing `## Verification`, still fails.
 
 `merge_group` is there because a repository with a merge queue cannot satisfy a required check that
 never runs for its merge group; the reusable workflow fetches the description by PR number in that case,
