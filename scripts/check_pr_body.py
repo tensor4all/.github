@@ -17,6 +17,10 @@ Contract (what passes):
       - a fenced code block (``` or ~~~) whose content has at least one line
         that is neither blank nor a full-line comment, and which is not just the
         fence's language tag, or
+      - prose evidence outside a fence: an indented code block, or a line that
+        names a command in an inline code span and quotes its output (a second
+        inline code span on the same line, or a `>` quotation line in the
+        section), or
       - `Not measured` followed by at least three words of reason, or
   * an explicit opt-out `<!-- skip-verification-check: <two or more words> -->`,
     which a human reviewer must see and accept.
@@ -56,7 +60,37 @@ PLACEHOLDER_MARKERS = (
     "command(s) and their real output",
 )
 
+INLINE_CODE = re.compile(r"(`+)(?!`)(.+?)(?<!`)\1(?!`)")
+INDENTED = re.compile(r"^(?: {4}|\t)\s*\S")
+
 OK, BAD = 0, 1
+
+
+def prose_evidence(section: str, fences: list[tuple[int, int, str]], sec_start: int) -> str | None:
+    """Evidence written as prose: names a command and quotes what it printed.
+
+    A fenced block is a formatting convention, not the thing the check is for.
+    The text of fenced blocks is blanked first so that an empty or comment-only
+    fence cannot donate a line here.
+    """
+    chars = list(section)
+    for f_start, f_end, _ in fences:
+        for i in range(max(f_start - sec_start, 0), min(f_end - sec_start, len(chars))):
+            if chars[i] != "\n":
+                chars[i] = " "
+    lines = "".join(chars).splitlines()
+    quoted = any(ln.lstrip().startswith(">") and ln.lstrip()[1:].strip() for ln in lines)
+    prev_blank = True
+    for ln in lines:
+        if prev_blank and INDENTED.match(ln):
+            return "an indented code block"
+        prev_blank = not ln.strip()
+        spans = [m.group(2).strip() for m in INLINE_CODE.finditer(ln) if m.group(2).strip()]
+        if len(spans) >= 2:
+            return "a command and its quoted output"
+        if spans and quoted:
+            return "a command and a quoted output block"
+    return None
 
 
 def strip_comments(text: str) -> str:
@@ -165,11 +199,15 @@ def check(body: str) -> tuple[int, str]:
             if lines:
                 return OK, f"Evidence found in a code block ({len(lines)} line(s))."
 
+    prose = prose_evidence(section, fences, sec_start)
+    if prose:
+        return OK, f"Evidence found in prose: {prose}."
+
     nm = NOT_MEASURED.search(section)
     if nm and len(nm.group(1).split()) >= 3:
         return OK, "`Not measured` accepted, with a reason."
 
-    return BAD, ("The `## Verification` section has no evidence: no code block with a command and no "
+    return BAD, ("The `## Verification` section has no evidence: no code block or prose naming a command and quoting its output, and no "
                  "`Not measured` with a reason. A reviewer needs to know what would have failed if "
                  "this change were wrong.")
 

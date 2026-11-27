@@ -11,9 +11,29 @@ name: PR verification section
 #
 # The body is read from the event when it is there, and fetched by number for
 # `merge_group`, which has no `pull_request` payload.
+#
+# Drafts are skipped (the job's `if`): a draft announces work in progress and is
+# not asking to be merged. The caller must list `ready_for_review` in its
+# `pull_request` types so that marking a draft ready runs the check.
+#
+# The pull request number is resolved in this order, because the event payload
+# has been seen to arrive without it on a `pull_request` event:
+#   1. github.event.pull_request.number
+#   2. GITHUB_REF, when it is `refs/pull/<n>/merge` or `refs/pull/<n>/head`
+#   3. `gh pr list --head <branch> --state open` when the branch has exactly one
+# If a `pull_request` event still yields no number, the step FAILS and says so in
+# words, with the event name it saw: a non-draft PR whose body cannot be read
+# must not pass unchecked. An event that is neither a pull request nor a merge
+# group is not a subject of this check and ends the step without failing.
 
 on:
   workflow_call:
+    inputs:
+      org_ref:
+        description: Ref of tensor4all/.github to take the checker from (default main).
+        required: false
+        default: main
+        type: string
 
 permissions:
   contents: read
@@ -22,11 +42,14 @@ permissions:
 jobs:
   body:
     name: body
+    # `draft` is absent on merge_group events, so those still run.
+    if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
         with:
           repository: tensor4all/.github
+          ref: ${{ inputs.org_ref }}
           path: org
           persist-credentials: false
       - name: Resolve the description
@@ -37,17 +60,44 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           MG_NUMBER: ${{ github.event.merge_group.pull_requests[0].number }}
           REPO: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_BRANCH: ${{ github.head_ref }}
         run: |
           set -euo pipefail
-          if [ -n "${PR_NUMBER:-}" ]; then
-            printf '%s' "${PR_BODY:-}" > "$RUNNER_TEMP/body.md"
-            echo "source=pull_request" >> "$GITHUB_OUTPUT"
-          elif [ -n "${MG_NUMBER:-}" ]; then
-            gh api "repos/${REPO}/pulls/${MG_NUMBER}" --jq .body > "$RUNNER_TEMP/body.md"
+          out="$RUNNER_TEMP/body.md"
+          if [ "${EVENT_NAME}" = "merge_group" ] || { [ -z "${PR_NUMBER:-}" ] && [ -n "${MG_NUMBER:-}" ]; }; then
+            gh api "repos/${REPO}/pulls/${MG_NUMBER}" --jq .body > "$out"
             echo "source=merge_group" >> "$GITHUB_OUTPUT"
-          else
-            echo "::error::Neither a pull request nor a merge group in this event; nothing to check."
+            echo "check=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "${EVENT_NAME}" != "pull_request" ] && [ "${EVENT_NAME}" != "pull_request_target" ]; then
+            printf '%s\n' "::notice::This event is '${EVENT_NAME}', which is neither a pull request nor a merge group, so there is no description to check. Skipping without failing."
+            echo "check=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ -n "${PR_NUMBER:-}" ]; then
+            printf '%s' "${PR_BODY:-}" > "$out"
+            echo "source=pull_request" >> "$GITHUB_OUTPUT"
+            echo "check=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # The payload carried no pull request. Do not trust it; look the number up.
+          number=""
+          case "${GITHUB_REF:-}" in
+            refs/pull/*/merge|refs/pull/*/head) number="$(printf '%s' "${GITHUB_REF}" | cut -d/ -f3)" ;;
+          esac
+          if [ -z "${number}" ] && [ -n "${HEAD_BRANCH:-}" ]; then
+            number="$(gh pr list -R "${REPO}" --head "${HEAD_BRANCH}" --state open --json number --jq 'if length == 1 then .[0].number else empty end' 2>/dev/null || true)"
+          fi
+          if [ -z "${number}" ]; then
+            printf '%s\n' "::error::The event is '${EVENT_NAME}' but the pull request number was empty in the payload, was not in GITHUB_REF (${GITHUB_REF:-unset}), and branch '${HEAD_BRANCH:-unset}' does not match exactly one open pull request. The description could not be read, so it was not checked. This is not a problem with the description; re-run the job."
             exit 1
           fi
+          gh pr view "${number}" -R "${REPO}" --json body --jq .body > "$out"
+          printf '%s\n' "::notice::The payload had no pull request number; resolved #${number} instead."
+          echo "source=lookup" >> "$GITHUB_OUTPUT"
+          echo "check=true" >> "$GITHUB_OUTPUT"
       - name: Check the description against the template's contract
+        if: steps.body.outputs.check == 'true'
         run: python3 org/scripts/check_pr_body.py --body-file "$RUNNER_TEMP/body.md"

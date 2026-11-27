@@ -60,6 +60,20 @@ class Accepts(unittest.TestCase):
         code, msg = check("## Verification\n\n<!-- skip-verification-check: reviewer approved verbally -->\n")
         self.assertEqual(code, OK, msg)
 
+    def test_prose_command_and_quoted_output(self):
+        body = "## Verification\n\nI ran `cargo test -p foo`, which printed `216 passed; 0 failed`.\n"
+        code, msg = check(body)
+        self.assertEqual(code, OK, msg)
+
+    def test_prose_command_with_blockquote_output(self):
+        body = "## Verification\n\nRan `pytest -q`:\n\n> 12 passed in 0.4s\n"
+        code, msg = check(body)
+        self.assertEqual(code, OK, msg)
+
+    def test_indented_code_block(self):
+        code, msg = check("## Verification\n\nOutput:\n\n    pytest\n    12 passed\n")
+        self.assertEqual(code, OK, msg)
+
 
 class Rejects(unittest.TestCase):
     def test_empty_body(self):
@@ -104,6 +118,24 @@ class Rejects(unittest.TestCase):
         """regression: an unclosed `<!--` hides text from a reviewer but not from us."""
         body = "<!--\n## Verification\n\n```sh\npytest\n1 passed\n```\n"
         self.assertEqual(check(body)[0], BAD)
+
+    def test_prose_without_a_quoted_output(self):
+        """The prose path must not become "say anything": a command alone is a claim."""
+        self.assertEqual(check("## Verification\n\nI ran `cargo test` and it was fine.\n")[0], BAD)
+
+    def test_prose_with_no_command(self):
+        self.assertEqual(check("## Verification\n\nIt works, trust me. Tests pass.\n")[0], BAD)
+
+    def test_prose_evidence_in_another_section_does_not_count(self):
+        body = "## Verification\n\n## Notes\n\nRan `cargo test`: `216 passed`.\n"
+        self.assertEqual(check(body)[0], BAD)
+
+    def test_prose_hidden_in_a_comment(self):
+        body = "## Verification\n\n<!-- ran `cargo test`: `216 passed` -->\n"
+        self.assertEqual(check(body)[0], BAD)
+
+    def test_empty_fence_does_not_donate_to_prose(self):
+        self.assertEqual(check("## Verification\n\n```\n# `a` `b`\n```\n")[0], BAD)
 
     def test_not_measured_without_reason(self):
         self.assertEqual(check("## Verification\n\nNot measured\n")[0], BAD)

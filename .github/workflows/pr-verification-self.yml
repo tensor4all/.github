@@ -1,0 +1,19 @@
+name: PR verification section (self)
+
+# This repository's own pull requests go through the reusable check, from the
+# pull request's own head, so a change to the check is exercised by the PR that
+# makes it. Both a draft run (skipped) and a ready run (checked) are real runs.
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  body:
+    uses: ./.github/workflows/pr-verification.yml
+    with:
+      org_ref: ${{ github.event.pull_request.head.sha }}
